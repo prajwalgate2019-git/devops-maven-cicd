@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devops-maven-cicd
+spec:
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: devops-maven-cicd
+
+  template:
+    metadata:
+      labels:
+        app: devops-maven-cicd
+
+    spec:
+      containers:
+        - name: devops-maven-cicd
+          image: prajwal11a/devops-maven-cicd:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
