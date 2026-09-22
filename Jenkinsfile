@@ -1,99 +1,58 @@
 pipeline {
     agent any
 
-    options {
-        disableConcurrentBuilds()
-    }
-
-    tools {
-        maven 'Maven-3.9.12'
+    environment {
+        DOCKER_IMAGE = 'prajwal11a/devops-maven-cicd:latest'
+        DOCKER_CREDENTIALS = 'dockerhub-credentials'
+        SSH_CREDENTIALS = 'docker-k8s-ssh'
+        K8S_HOST = '35.154.145.128'
     }
 
     stages {
 
         stage('Checkout') {
             steps {
-                echo 'Code checked out from GitHub'
+                checkout scm
             }
         }
 
-        stage('Maven Build') {
+        stage('Docker Build') {
             steps {
-                sh 'mvn clean package'
+                sh '''
+                    docker build -t $DOCKER_IMAGE .
+                '''
             }
         }
 
-        stage('Create ZIP') {
-            steps {
-                sh 'zip -j devops-project.zip index.html'
-            }
-        }
-
-        stage('Deploy App 1') {
+        stage('Docker Push') {
             steps {
                 withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'app1-ubuntu-ssh',
-                        keyFileVariable: 'SSH_KEY',
-                        usernameVariable: 'SSH_USER'
+                    usernamePassword(
+                        credentialsId: "${DOCKER_CREDENTIALS}",
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_TOKEN'
                     )
                 ]) {
                     sh '''
-                        unzip -p devops-project.zip index.html > webserver1.html
-
-                        scp -o StrictHostKeyChecking=no \
-                            -o UserKnownHostsFile=/dev/null \
-                            -i "$SSH_KEY" \
-                            webserver1.html \
-                            "$SSH_USER@10.0.11.201:/tmp/webserver1.html"
-
-                        ssh -o StrictHostKeyChecking=no \
-                            -o UserKnownHostsFile=/dev/null \
-                            -i "$SSH_KEY" \
-                            "$SSH_USER@10.0.11.201" \
-                            'sudo mv /tmp/webserver1.html /var/www/html/webserver1.html && sudo chmod 644 /var/www/html/webserver1.html'
-
-                        rm -f webserver1.html
+                        echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker push $DOCKER_IMAGE
+                        docker logout
                     '''
                 }
             }
         }
 
-        stage('Deploy App 2') {
+        stage('Deploy to Kubernetes') {
             steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'app2-amazonlinux-ssh',
-                        keyFileVariable: 'SSH_KEY',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
+                sshagent(["${SSH_CREDENTIALS}"]) {
                     sh '''
-                        unzip -p devops-project.zip index.html > webserver2.html
-
-                        scp -o StrictHostKeyChecking=no \
-                            -o UserKnownHostsFile=/dev/null \
-                            -i "$SSH_KEY" \
-                            webserver2.html \
-                            "$SSH_USER@10.0.12.58:/tmp/webserver2.html"
-
-                        ssh -o StrictHostKeyChecking=no \
-                            -o UserKnownHostsFile=/dev/null \
-                            -i "$SSH_KEY" \
-                            "$SSH_USER@10.0.12.58" \
-                            'sudo mv /tmp/webserver2.html /usr/share/nginx/html/webserver2.html && sudo chmod 644 /usr/share/nginx/html/webserver2.html'
-
-                        rm -f webserver2.html
+                        ssh -o StrictHostKeyChecking=no ubuntu@$K8S_HOST \
+                        "kubectl apply -f deployment.yaml && \
+                         kubectl rollout restart deployment/devops-maven-cicd && \
+                         kubectl rollout status deployment/devops-maven-cicd"
                     '''
                 }
             }
-        }
-    }
-
-    post {
-        success {
-            archiveArtifacts artifacts: 'devops-project.zip',
-                             fingerprint: true
         }
     }
 }
